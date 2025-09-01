@@ -1,10 +1,11 @@
 import sys
 import os
+import shutil
 from functools import partial
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSpinBox, QFileDialog, QScrollArea, QFrame, QSizePolicy,
-    QListView, QTreeView, QAbstractItemView
+    QListView, QTreeView, QAbstractItemView, QCheckBox, QMessageBox
 )
 from PySide6.QtCore import Qt
 
@@ -16,11 +17,21 @@ class App(QWidget):
         super().__init__()
 
         self.setWindowTitle("File Organizer")
-        self.setGeometry(100, 100, 700, 550)
-        self.setMinimumSize(600, 450)
+        self.setGeometry(100, 100, 700, 600) # Increased height for checkboxes
+        self.setMinimumSize(600, 500)
+
+        # --- File Type Definitions ---
+        self.FILE_TYPES = {
+            "Images": ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'],
+            "Videos": ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv'],
+            "Audios": ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'],
+            "Documents": ['.txt', '.doc', '.docx', '.pdf', '.xls', '.xlsx', '.ppt', '.pptx', '.rtf'],
+            "Other": [] # This will be handled dynamically
+        }
 
         # --- Variables ---
         self.destination_widgets = {}  # Dictionary to store the row widget and its path
+        self.last_spinner_value = 1    # Store spinner value when "Distribute Equally" is checked
 
         self._create_widgets()
         self._setup_layouts()
@@ -41,24 +52,42 @@ class App(QWidget):
         self.files_per_folder_spinner.setRange(0, 999999) # Min 0, "infinite" max
         self.files_per_folder_spinner.setValue(1) # Default value
 
-        # --- 3. Destination Folders Section ---
+        self.distribute_equally_cb = QCheckBox("Distribute Equally")
+        self.distribute_equally_cb.stateChanged.connect(self._toggle_distribute_equally)
+
+        # --- 3. File Type Checkboxes ---
+        self.checkboxes_label = QLabel("File Types to Move:")
+        self.cb_images = QCheckBox("Images")
+        self.cb_videos = QCheckBox("Videos")
+        self.cb_audios = QCheckBox("Audios")
+        self.cb_documents = QCheckBox("Documents")
+        self.cb_other = QCheckBox("Other")
+        self.cb_all = QCheckBox("All")
+        
+        self.type_checkboxes = [self.cb_images, self.cb_videos, self.cb_audios, self.cb_documents, self.cb_other]
+        for cb in self.type_checkboxes:
+            cb.stateChanged.connect(self._update_all_checkbox_state)
+        self.cb_all.stateChanged.connect(self._toggle_all_checkboxes)
+
+        # Start with all file types selected by default
+        self.cb_all.setChecked(True)
+
+        # --- 4. Destination Folders Section ---
         self.dest_add_button = QPushButton("Add Destination Folders")
         self.dest_add_button.clicked.connect(self._add_destination_folder)
 
-        # --- 4. Destination Folders List (with scroll) ---
-        # The list itself will be a layout within a QScrollArea
+        # --- 5. Destination Folders List (with scroll) ---
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.StyledPanel)
         
-        # Widget that will contain the list layout
         self.list_content_widget = QWidget()
         self.destination_list_layout = QVBoxLayout(self.list_content_widget)
         self.destination_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
         self.scroll_area.setWidget(self.list_content_widget)
 
-        # --- 5. Execute Button ---
+        # --- 6. Execute Button ---
         self.execute_button = QPushButton("Execute")
         self.execute_button.clicked.connect(self._execute)
         
@@ -73,17 +102,33 @@ class App(QWidget):
         source_layout.addWidget(self.source_entry)
         source_layout.addWidget(self.source_button)
 
+        # Checkboxes layout
+        checkboxes_layout = QHBoxLayout()
+        checkboxes_layout.setSpacing(10)
+        checkboxes_layout.addWidget(self.cb_images)
+        checkboxes_layout.addWidget(self.cb_videos)
+        checkboxes_layout.addWidget(self.cb_audios)
+        checkboxes_layout.addWidget(self.cb_documents)
+        checkboxes_layout.addWidget(self.cb_other)
+        checkboxes_layout.addStretch()
+        checkboxes_layout.addWidget(self.cb_all)
+
         # Top controls layout (spinner and add button)
         top_controls_layout = QHBoxLayout()
+        top_controls_layout.setSpacing(10)
         top_controls_layout.addWidget(self.spinner_label)
         top_controls_layout.addWidget(self.files_per_folder_spinner)
+        top_controls_layout.addWidget(self.distribute_equally_cb)
         top_controls_layout.addStretch() # Pushes the button to the right
         top_controls_layout.addWidget(self.dest_add_button)
 
         # Adding widgets to the main layout
         main_layout.addWidget(self.source_label)
         main_layout.addLayout(source_layout)
-        main_layout.addSpacing(15)
+        main_layout.addSpacing(10)
+        main_layout.addWidget(self.checkboxes_label)
+        main_layout.addLayout(checkboxes_layout)
+        main_layout.addSpacing(10)
         main_layout.addLayout(top_controls_layout)
         
         # List header
@@ -146,9 +191,45 @@ class App(QWidget):
             QLabel {
                 padding: 5px;
             }
+            QCheckBox {
+                spacing: 5px;
+            }
         """)
         # Add IDs for specific styling
         self.execute_button.setObjectName("ExecuteButton")
+
+    def _toggle_distribute_equally(self, state):
+        """Disables/Enables the spinner when 'Distribute Equally' is checked."""
+        is_checked = (state == Qt.CheckState.Checked.value)
+        if is_checked:
+            # Store the current value if it's not 0, before disabling
+            current_value = self.files_per_folder_spinner.value()
+            if current_value > 0:
+                self.last_spinner_value = current_value
+            
+            self.files_per_folder_spinner.setValue(0)
+            self.files_per_folder_spinner.setEnabled(False)
+        else:
+            # Restore the last known value, ensuring it's at least 1
+            self.files_per_folder_spinner.setValue(self.last_spinner_value)
+            self.files_per_folder_spinner.setEnabled(True)
+
+    def _toggle_all_checkboxes(self, state):
+        """Toggles all type checkboxes based on the 'All' checkbox state."""
+        is_checked = (state == Qt.CheckState.Checked.value)
+        # Block signals to prevent _update_all_checkbox_state from firing for each change
+        for cb in self.type_checkboxes:
+            cb.blockSignals(True)
+            cb.setChecked(is_checked)
+            cb.blockSignals(False)
+
+    def _update_all_checkbox_state(self):
+        """Updates the 'All' checkbox if all other checkboxes are checked/unchecked."""
+        all_checked = all(cb.isChecked() for cb in self.type_checkboxes)
+        # Block signals to prevent _toggle_all_checkboxes from firing
+        self.cb_all.blockSignals(True)
+        self.cb_all.setChecked(all_checked)
+        self.cb_all.blockSignals(False)
 
     def _select_source_folder(self):
         """Opens a dialog to select a source folder."""
@@ -157,21 +238,13 @@ class App(QWidget):
             self.source_entry.setText(folder)
 
     def _add_destination_folder(self):
-        """
-        Opens a custom dialog that allows the selection of MULTIPLE folders.
-        This approach is necessary to bypass a limitation of the standard QFileDialog.
-        """
+        """Opens a custom dialog that allows the selection of MULTIPLE folders."""
         dialog = QFileDialog(self)
         dialog.setFileMode(QFileDialog.FileMode.Directory)
         dialog.setWindowTitle("Choose Destination Folders (use Ctrl+Click)")
-        
-        # Essential: Uses the non-native Qt dialog, which is more customizable.
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-        
-        # Ensures that only directories are shown and selectable.
         dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
         
-        # Finds the internal list/tree view components to enable multi-selection.
         list_views = dialog.findChildren(QListView)
         tree_views = dialog.findChildren(QTreeView)
         all_views = list_views + tree_views
@@ -197,8 +270,6 @@ class App(QWidget):
         remove_button = QPushButton("Remove")
         remove_button.setObjectName("RemoveButton")
         remove_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        
-        # Connects the remove button to the function, passing the path as an argument
         remove_button.clicked.connect(partial(self._remove_destination_folder, folder_path))
 
         row_layout.addWidget(path_label)
@@ -211,22 +282,135 @@ class App(QWidget):
         """Removes a folder from the visual list."""
         if folder_path_to_remove in self.destination_widgets:
             widget_to_remove = self.destination_widgets[folder_path_to_remove]
-            # Removes the widget from the layout and deletes it
             self.destination_list_layout.removeWidget(widget_to_remove)
             widget_to_remove.deleteLater()
             del self.destination_widgets[folder_path_to_remove]
 
+    def _show_message(self, title, text, icon=QMessageBox.Icon.Warning):
+        """Helper function to show a message box."""
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(icon)
+        msg_box.setText(text)
+        msg_box.setWindowTitle(title)
+        msg_box.exec()
+
     def _execute(self):
-        """Function to be executed by the "Execute" button."""
-        print("--- Execute Action ---")
-        print(f"Source Folder: {self.source_entry.text()}")
-        print(f"Files per Folder: {self.files_per_folder_spinner.value()}")
-        print(f"Destination Folders: {list(self.destination_widgets.keys())}")
-        print("----------------------")
+        """Main function to validate inputs and move files."""
+        source_folder = self.source_entry.text()
+        dest_folders = list(self.destination_widgets.keys())
+        files_per_folder = self.files_per_folder_spinner.value()
+
+        # --- 1. Input Validation ---
+        if not source_folder:
+            self._show_message("Validation Error", "Please select a source folder.")
+            return
+        if not dest_folders:
+            self._show_message("Validation Error", "Please add at least one destination folder.")
+            return
+        
+        try:
+            source_files_all = [f for f in os.listdir(source_folder) if os.path.isfile(os.path.join(source_folder, f))]
+        except FileNotFoundError:
+            self._show_message("Error", f"Source folder not found:\n{source_folder}")
+            return
+
+        if not source_files_all:
+            self._show_message("Validation Error", "The source folder is empty. No files to move.")
+            return
+
+        # --- 2. File Filtering ---
+        selected_extensions = set()
+        checked_types = []
+        if self.cb_images.isChecked():
+            selected_extensions.update(self.FILE_TYPES["Images"])
+            checked_types.append("Images")
+        if self.cb_videos.isChecked():
+            selected_extensions.update(self.FILE_TYPES["Videos"])
+            checked_types.append("Videos")
+        if self.cb_audios.isChecked():
+            selected_extensions.update(self.FILE_TYPES["Audios"])
+            checked_types.append("Audios")
+        if self.cb_documents.isChecked():
+            selected_extensions.update(self.FILE_TYPES["Documents"])
+            checked_types.append("Documents")
+
+        known_extensions = {ext for ext_list in self.FILE_TYPES.values() for ext in ext_list}
+        files_to_move = []
+
+        if self.cb_other.isChecked():
+            checked_types.append("Other")
+            for file in source_files_all:
+                file_ext = os.path.splitext(file)[1].lower()
+                if file_ext in selected_extensions or file_ext not in known_extensions:
+                    files_to_move.append(file)
+        else:
+             for file in source_files_all:
+                if os.path.splitext(file)[1].lower() in selected_extensions:
+                    files_to_move.append(file)
+        
+        if not files_to_move:
+            self._show_message("Information", "No files matching the selected types were found in the source folder.")
+            return
+
+        # --- 3. File Distribution Logic ---
+        total_moved = 0
+        summary_messages = []
+
+        if files_per_folder > 0:
+            # Move a fixed number of files to each folder
+            for dest_folder in dest_folders:
+                moved_this_run = 0
+                for _ in range(files_per_folder):
+                    if not files_to_move:
+                        break
+                    file_to_move = files_to_move.pop(0)
+                    try:
+                        shutil.move(os.path.join(source_folder, file_to_move), os.path.join(dest_folder, file_to_move))
+                        total_moved += 1
+                        moved_this_run += 1
+                    except Exception as e:
+                        self._show_message("File Move Error", f"Could not move {file_to_move} to {dest_folder}.\nError: {e}")
+                summary_messages.append(f"Moved {moved_this_run} file(s) to {os.path.basename(dest_folder)}.")
+            
+            if len(dest_folders) * files_per_folder > total_moved:
+                 summary_messages.append("\nNote: Not enough files were available to complete all operations.")
+
+        else: # files_per_folder == 0, distribute equally
+            num_files = len(files_to_move)
+            num_dests = len(dest_folders)
+            base_files = num_files // num_dests
+            remainder = num_files % num_dests
+            
+            file_iterator = iter(files_to_move)
+            
+            for i, dest_folder in enumerate(dest_folders):
+                num_to_move = base_files + (1 if i < remainder else 0)
+                moved_this_run = 0
+                for _ in range(num_to_move):
+                    try:
+                        file_to_move = next(file_iterator)
+                        shutil.move(os.path.join(source_folder, file_to_move), os.path.join(dest_folder, file_to_move))
+                        total_moved += 1
+                        moved_this_run += 1
+                    except StopIteration:
+                        break # Should not happen with this logic, but safe to have
+                    except Exception as e:
+                        self._show_message("File Move Error", f"Could not move file to {dest_folder}.\nError: {e}")
+                summary_messages.append(f"Moved {moved_this_run} file(s) to {os.path.basename(dest_folder)}.")
+
+            if remainder > 0:
+                summary_messages.append("\nNote: Files were not distributed perfectly evenly.")
+
+        # --- 4. Final Report ---
+        final_summary = f"Operation Complete!\n\nTotal files moved: {total_moved}\n\n" + "\n".join(summary_messages)
+        self._show_message("Success", final_summary, QMessageBox.Icon.Information)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = App()
     window.show()
     sys.exit(app.exec())
+
+
 
