@@ -1,6 +1,7 @@
 import sys
 import os
 import shutil
+import random
 from functools import partial
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -45,6 +46,8 @@ class App(QWidget):
         self.source_entry.setReadOnly(True)
         self.source_button = QPushButton("Choose Folder...")
         self.source_button.clicked.connect(self._select_source_folder)
+
+        self.random_choice_cb = QCheckBox("Choose Randomly")
 
         # --- 2. Files per Folder Section (Spinner) ---
         self.spinner_label = QLabel("Files per Folder:")
@@ -125,6 +128,7 @@ class App(QWidget):
         # Adding widgets to the main layout
         main_layout.addWidget(self.source_label)
         main_layout.addLayout(source_layout)
+        main_layout.addWidget(self.random_choice_cb)
         main_layout.addSpacing(10)
         main_layout.addWidget(self.checkboxes_label)
         main_layout.addLayout(checkboxes_layout)
@@ -231,15 +235,32 @@ class App(QWidget):
         self.cb_all.setChecked(all_checked)
         self.cb_all.blockSignals(False)
 
+    def _get_videos_path(self):
+        """Gets the user's videos/movies library path, falling back to home."""
+        home = os.path.expanduser('~')
+        # Common paths for Videos library across OSes
+        videos_path = os.path.join(home, 'Videos')
+        movies_path = os.path.join(home, 'Movies') # Often used on macOS
+
+        if os.path.isdir(videos_path):
+            return videos_path
+        elif os.path.isdir(movies_path):
+            return movies_path
+        else:
+            return home # Fallback to user's home directory
+
     def _select_source_folder(self):
         """Opens a dialog to select a source folder."""
-        folder = QFileDialog.getExistingDirectory(self, "Choose Source Folder")
+        start_path = self._get_videos_path()
+        folder = QFileDialog.getExistingDirectory(self, "Choose Source Folder", start_path)
         if folder:
             self.source_entry.setText(folder)
 
     def _add_destination_folder(self):
         """Opens a custom dialog that allows the selection of MULTIPLE folders."""
+        start_path = self._get_videos_path()
         dialog = QFileDialog(self)
+        dialog.setDirectory(start_path)
         dialog.setFileMode(QFileDialog.FileMode.Directory)
         dialog.setWindowTitle("Choose Destination Folders (use Ctrl+Click)")
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
@@ -352,6 +373,10 @@ class App(QWidget):
             self._show_message("Information", "No files matching the selected types were found in the source folder.")
             return
 
+        # --- New feature: Randomize file order if checked ---
+        if self.random_choice_cb.isChecked():
+            random.shuffle(files_to_move)
+
         # --- 3. File Distribution Logic ---
         total_moved = 0
         summary_messages = []
@@ -411,6 +436,5 @@ if __name__ == "__main__":
     window = App()
     window.show()
     sys.exit(app.exec())
-
 
 
