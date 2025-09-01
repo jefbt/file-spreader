@@ -42,6 +42,12 @@ uv pip run main.py
 
 Refer to the documentation or help command for available options.
 
+## Pysintaller
+To use pyinstaller, run
+```bash
+pyinstaller --name "File Spreader" --noconfirm --noconsole --hidden-import=PySide6.QtCore --hidden-import=PySide6.QtWidgets --hidden-import=PySide6.QtGui main.py
+```
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
