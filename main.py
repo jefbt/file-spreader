@@ -18,11 +18,10 @@ class App(QWidget):
         super().__init__()
 
         self.setWindowTitle("File Organizer")
-        self.setGeometry(100, 100, 700, 600)
-        self.setMinimumSize(600, 500)
+        self.setGeometry(100, 100, 750, 600)
+        self.setMinimumSize(700, 500)
         
         # --- Settings ---
-        # Uses QSettings for cross-platform persistent storage
         self.settings = QSettings("MyCompany", "FileOrganizer")
 
         # --- File Type Definitions ---
@@ -31,7 +30,7 @@ class App(QWidget):
             "Videos": ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv'],
             "Audios": ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'],
             "Documents": ['.txt', '.doc', '.docx', '.pdf', '.xls', '.xlsx', '.ppt', '.pptx', '.rtf'],
-            "Other": [] # This will be handled dynamically
+            "Other": [] 
         }
 
         # --- Variables ---
@@ -41,7 +40,7 @@ class App(QWidget):
 
         self._create_widgets()
         self._setup_layouts()
-        self._load_settings() # Load settings after UI is created
+        self._load_settings()
 
     def _create_widgets(self):
         """Creates all the application's widgets."""
@@ -62,6 +61,14 @@ class App(QWidget):
         self.source_button.clicked.connect(self._select_source_folder)
 
         self.random_choice_cb = QCheckBox("Choose Randomly")
+        
+        self.generate_dest_cb = QCheckBox("Generate Destiny Folders")
+        self.generate_dest_cb.stateChanged.connect(self._toggle_generate_dest_folders)
+        
+        self.dest_count_label = QLabel("Destiny Folders Count:")
+        self.dest_count_spinner = QSpinBox()
+        self.dest_count_spinner.setRange(1, 9999)
+        self.dest_count_spinner.setValue(1)
 
         # --- 2. Files per Folder Section (Spinner) ---
         self.spinner_label = QLabel("Files per Folder:")
@@ -125,6 +132,14 @@ class App(QWidget):
         source_layout = QHBoxLayout()
         source_layout.addWidget(self.source_entry)
         source_layout.addWidget(self.source_button)
+        
+        # Options below source folder
+        source_options_layout = QHBoxLayout()
+        source_options_layout.addWidget(self.random_choice_cb)
+        source_options_layout.addWidget(self.generate_dest_cb)
+        source_options_layout.addWidget(self.dest_count_label)
+        source_options_layout.addWidget(self.dest_count_spinner)
+        source_options_layout.addStretch()
 
         # Checkboxes layout
         checkboxes_layout = QHBoxLayout()
@@ -150,7 +165,7 @@ class App(QWidget):
         # Adding widgets to the main layout
         main_layout.addWidget(self.source_label)
         main_layout.addLayout(source_layout)
-        main_layout.addWidget(self.random_choice_cb)
+        main_layout.addLayout(source_options_layout)
         main_layout.addSpacing(10)
         main_layout.addWidget(self.checkboxes_label)
         main_layout.addLayout(checkboxes_layout)
@@ -274,6 +289,19 @@ class App(QWidget):
             self.files_per_folder_spinner.setValue(self.last_spinner_value)
             self.files_per_folder_spinner.setEnabled(True)
 
+    def _toggle_generate_dest_folders(self, state):
+        """Enables/disables the destination folder generation widgets and list."""
+        is_checked = (state == Qt.CheckState.Checked.value)
+        
+        # Toggle spinner and label
+        self.dest_count_spinner.setEnabled(is_checked)
+        self.dest_count_label.setEnabled(is_checked)
+        
+        # Toggle manual destination folder widgets
+        self.scroll_area.setEnabled(not is_checked)
+        self.dest_add_button.setEnabled(not is_checked)
+        self.clear_list_button.setEnabled(not is_checked)
+
     def _toggle_all_checkboxes(self, state):
         """Toggles all type checkboxes based on the 'All' checkbox state."""
         is_checked = (state == Qt.CheckState.Checked.value)
@@ -381,7 +409,8 @@ class App(QWidget):
             self.source_entry.setText("")
             self._clear_destination_list()
             self.random_choice_cb.setChecked(False)
-            self.distribute_equally_cb.setChecked(False) # This also handles the spinner
+            self.generate_dest_cb.setChecked(False) # This handles dependent widgets
+            self.distribute_equally_cb.setChecked(False)
             self.cb_all.setChecked(True)
             self.is_dark_theme = False
             self._apply_styles()
@@ -391,23 +420,24 @@ class App(QWidget):
         self.save_choices_cb.setChecked(self.settings.value("save_choices", True, type=bool))
         
         if not self.save_choices_cb.isChecked():
-            self._reset_to_defaults() # Reset if save is disabled
-            self.save_choices_cb.setChecked(False) # But keep the checkbox state
+            self._reset_to_defaults()
+            self.save_choices_cb.setChecked(False)
             return
 
         self.source_entry.setText(self.settings.value("source_folder", "", type=str))
         self.random_choice_cb.setChecked(self.settings.value("random_choice", False, type=bool))
+        self.generate_dest_cb.setChecked(self.settings.value("generate_dest", False, type=bool))
+        self.dest_count_spinner.setValue(self.settings.value("dest_count", 1, type=int))
         self.distribute_equally_cb.setChecked(self.settings.value("distribute_equally", False, type=bool))
         self.files_per_folder_spinner.setValue(self.settings.value("files_per_folder", 1, type=int))
         self.is_dark_theme = self.settings.value("is_dark_theme", False, type=bool)
 
-        # Load checkboxes (except 'All')
         self.cb_images.setChecked(self.settings.value("cb_images", True, type=bool))
         self.cb_videos.setChecked(self.settings.value("cb_videos", True, type=bool))
         self.cb_audios.setChecked(self.settings.value("cb_audios", True, type=bool))
         self.cb_documents.setChecked(self.settings.value("cb_documents", True, type=bool))
         self.cb_other.setChecked(self.settings.value("cb_other", True, type=bool))
-        self._update_all_checkbox_state() # Update 'All' based on others
+        self._update_all_checkbox_state()
 
         dest_folders = self.settings.value("destination_folders", [], type=list)
         for folder in dest_folders:
@@ -421,6 +451,8 @@ class App(QWidget):
         self.settings.setValue("source_folder", self.source_entry.text())
         self.settings.setValue("destination_folders", list(self.destination_widgets.keys()))
         self.settings.setValue("random_choice", self.random_choice_cb.isChecked())
+        self.settings.setValue("generate_dest", self.generate_dest_cb.isChecked())
+        self.settings.setValue("dest_count", self.dest_count_spinner.value())
         self.settings.setValue("distribute_equally", self.distribute_equally_cb.isChecked())
         self.settings.setValue("files_per_folder", self.files_per_folder_spinner.value())
         self.settings.setValue("is_dark_theme", self.is_dark_theme)
@@ -439,14 +471,29 @@ class App(QWidget):
     def _execute(self):
         """Main function to validate inputs and move files."""
         source_folder = self.source_entry.text()
-        dest_folders = list(self.destination_widgets.keys())
-        files_per_folder = self.files_per_folder_spinner.value()
-
+        
+        # --- 1. Input Validation & Destination Folder Handling ---
         if not source_folder:
             self._show_message("Validation Error", "Please select a source folder.")
             return
+
+        dest_folders = []
+        if self.generate_dest_cb.isChecked():
+            count = self.dest_count_spinner.value()
+            for i in range(1, count + 1):
+                new_folder_name = f"Generated_Folder_{i}"
+                new_folder_path = os.path.join(source_folder, new_folder_name)
+                try:
+                    os.makedirs(new_folder_path, exist_ok=True)
+                    dest_folders.append(new_folder_path)
+                except OSError as e:
+                    self._show_message("Creation Error", f"Could not create folder: {new_folder_path}\nError: {e}")
+                    return
+        else:
+            dest_folders = list(self.destination_widgets.keys())
+
         if not dest_folders:
-            self._show_message("Validation Error", "Please add at least one destination folder.")
+            self._show_message("Validation Error", "Please add or generate at least one destination folder.")
             return
         
         try:
@@ -459,6 +506,7 @@ class App(QWidget):
             self._show_message("Validation Error", "The source folder is empty. No files to move.")
             return
 
+        files_per_folder = self.files_per_folder_spinner.value()
         selected_extensions = set()
         if self.cb_images.isChecked(): selected_extensions.update(self.FILE_TYPES["Images"])
         if self.cb_videos.isChecked(): selected_extensions.update(self.FILE_TYPES["Videos"])
